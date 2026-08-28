@@ -2,13 +2,19 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "../db/schema";
 
-const connectionString = process.env.DATABASE_URL!;
+const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSLMODE } = process.env;
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL environment variable is required");
+if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
+  throw new Error("Database environment variables (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME) are required");
 }
 
-const client = postgres(connectionString, {
+const client = postgres({
+  host: DB_HOST,
+  port: Number(DB_PORT) || 5432,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
+  ssl: DB_SSLMODE === "require",
   max: 10,
   idle_timeout: 20,
   connect_timeout: 10,
