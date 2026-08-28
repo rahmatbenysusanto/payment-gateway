@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import { Webhook } from "svix";
 import { paymentService } from "../services/payment";
 import type { SumopodWebhookPayload } from "../services/sumopod";
 
@@ -14,9 +15,32 @@ const webhookDataSchema = t.Object({
 });
 
 export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
+  .derive(async ({ request }) => ({
+    rawBody: await request.clone().text(),
+  }))
   .post(
     "/sumopod",
-    async ({ body, set }) => {
+    async ({ body, set, headers, rawBody }) => {
+      // 1. Verifikasi Webhook Token (simple comparison)
+      const token = headers["x-webhook-token"];
+      if (!token || token !== process.env.SUMOPOD_WEBHOOK_TOKEN) {
+        set.status = 401;
+        return { success: false, message: "Unauthorized" };
+      }
+
+      // 2. Verifikasi Svix Signature (HMAC-SHA256)
+      try {
+        const wh = new Webhook(process.env.SUMOPOD_WEBHOOK_SECRET!);
+        wh.verify(rawBody, {
+          "svix-id": headers["svix-id"] ?? "",
+          "svix-timestamp": headers["svix-timestamp"] ?? "",
+          "svix-signature": headers["svix-signature"] ?? "",
+        });
+      } catch {
+        set.status = 401;
+        return { success: false, message: "Invalid signature" };
+      }
+
       const result = await paymentService.handleGatewayWebhook(
         body as SumopodWebhookPayload
       );
