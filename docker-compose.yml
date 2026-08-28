@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nabungmas_backend
+    container_name: payment-gateway-api
     restart: always
     ports:
       - "3002:3002"
