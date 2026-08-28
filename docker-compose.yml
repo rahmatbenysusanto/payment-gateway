@@ -1,15 +1,32 @@
 services:
-  app:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: payment-gateway-api
-    restart: unless-stopped
+    container_name: nabungmas_backend
+    restart: always
     ports:
       - "3002:3002"
-    env_file:
-      - .env
     environment:
-      PORT: 3002
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - NODE_ENV=production
+      - PORT=3002
+      - DB_HOST=postgres-server
+      - DB_USER=avora
+      - DB_PASSWORD=Rahmat1204@
+      - DB_NAME=payment_gateway
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+      - API_KEY_SECRET=${API_KEY_SECRET}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - SUMOPOD_API_URL=${SUMOPOD_API_URL}
+      - SUMOPOD_API_KEY=${SUMOPOD_API_KEY}
+      - APP_URL=${APP_URL}
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    networks:
+      - avora_network
+
+networks:
+  avora_network:
+    external: true
