@@ -4,7 +4,7 @@ import * as schema from "../db/schema";
 
 const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSLMODE } = process.env;
 
-if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
+if (!DB_HOST || !DB_USER || DB_PASSWORD === undefined || !DB_NAME) {
   throw new Error("Database environment variables (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME) are required");
 }
 
