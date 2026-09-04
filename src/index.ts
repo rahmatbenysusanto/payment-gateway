@@ -7,6 +7,7 @@ import { merchantRoutes } from "./routes/merchants";
 import { transactionRoutes } from "./routes/transactions";
 import { adminTransactionRoutes } from "./routes/adminTransactions";
 import { webhookRoutes } from "./routes/webhooks";
+import { danaMandatedRoutes } from "./routes/danaNotify";
 import { reportRoutes } from "./routes/reports";
 import { GatewayNotConfiguredError } from "./services/payment";
 
@@ -85,6 +86,8 @@ const app = new Elysia()
       .use(webhookRoutes)
       .use(reportRoutes)
   )
+  // Path wajib DANA Gapura (SNAP) di root domain — lihat routes/danaNotify.ts
+  .use(danaMandatedRoutes)
   .listen(PORT);
 
 console.log(`\n🚀 Payment Gateway API berjalan di http://localhost:${PORT}`);

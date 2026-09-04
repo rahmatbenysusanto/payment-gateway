@@ -16,7 +16,7 @@ import { Elysia } from "elysia";
  */
 
 /** Catat callback mentah ke console untuk debugging. Selalu aman (tidak pernah throw). */
-async function logCallback(source: string, request: Request): Promise<void> {
+export async function logCallback(source: string, request: Request): Promise<void> {
   let rawBody = "(body tidak dapat dibaca)";
   try {
     rawBody = (await request.clone().text()) || "(kosong)";
@@ -59,15 +59,36 @@ async function serveFinishRedirect(request: Request): Promise<Response> {
   });
 }
 
+/**
+ * Notify server-to-server DANA (SNAP). Selalu HTTP 200 dengan body
+ * `responseCode` standar SNAP — body inilah yang DANA validasi, bukan
+ * sekadar status 200. GET juga dijawab sama (dipakai DANA untuk validasi URL).
+ * - finish-payment  → SNAP service code 56 → 2005600
+ * - disburse-notify → SNAP service code 43 → 2004300
+ */
+const SNAP_RESPONSE_CODE: Record<string, { responseCode: string; responseMessage: string }> = {
+  "finish-payment": { responseCode: "2005600", responseMessage: "Successful" },
+  "disburse-notify": { responseCode: "2004300", responseMessage: "Successful" },
+};
+
+export async function serveNotify(source: string, request: Request) {
+  await logCallback(source, request);
+  return SNAP_RESPONSE_CODE[source] ?? { responseCode: "2000000", responseMessage: "Successful" };
+}
+
 const GAPURA_TAG = "Webhooks";
 
 export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
+  .get("/gapura/finish-payment", ({ request }) => serveNotify("finish-payment", request), {
+    detail: {
+      summary: "Finish Payment — validasi URL (GET)",
+      tags: [GAPURA_TAG],
+      description: "Balasan GET untuk validasi URL oleh DANA. Selalu HTTP 200.",
+    },
+  })
   .post(
     "/gapura/finish-payment",
-    async ({ request }) => {
-      await logCallback("finish-payment", request);
-      return { success: true };
-    },
+    ({ request }) => serveNotify("finish-payment", request),
     {
       detail: {
         summary: "Finish Payment (notifikasi server-to-server DANA Gapura)",
@@ -79,12 +100,16 @@ export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
       },
     }
   )
+  .get("/gapura/disburse-notify", ({ request }) => serveNotify("disburse-notify", request), {
+    detail: {
+      summary: "Disburse to Bank Notify — validasi URL (GET)",
+      tags: [GAPURA_TAG],
+      description: "Balasan GET untuk validasi URL oleh DANA. Selalu HTTP 200.",
+    },
+  })
   .post(
     "/gapura/disburse-notify",
-    async ({ request }) => {
-      await logCallback("disburse-notify", request);
-      return { success: true };
-    },
+    ({ request }) => serveNotify("disburse-notify", request),
     {
       detail: {
         summary: "Notifikasi disburse ke bank (server-to-server DANA Gapura)",
