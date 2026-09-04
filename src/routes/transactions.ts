@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../config/database";
 import { transactions } from "../db/schema";
-import { paymentService } from "../services/payment";
+import { paymentService, GatewayNotConfiguredError } from "../services/payment";
 import { authMiddleware } from "../middleware/auth";
 
 export const transactionRoutes = new Elysia({ prefix: "/transactions" })
@@ -48,6 +48,7 @@ export const transactionRoutes = new Elysia({ prefix: "/transactions" })
           },
         };
       } catch (err) {
+        if (err instanceof GatewayNotConfiguredError) throw err;
         set.status = 400;
         return {
           success: false,
@@ -144,6 +145,7 @@ export const transactionRoutes = new Elysia({ prefix: "/transactions" })
         const updated = await paymentService.checkPaymentStatus(params.id);
         return { success: true, data: updated };
       } catch (err) {
+        if (err instanceof GatewayNotConfiguredError) throw err;
         set.status = 400;
         return {
           success: false,
@@ -154,7 +156,7 @@ export const transactionRoutes = new Elysia({ prefix: "/transactions" })
     {
       params: t.Object({ id: t.String() }),
       detail: {
-        summary: "Cek Status ke Sumopod",
+        summary: "Cek Status Pembayaran",
         tags: ["Transactions"],
         security: [{ BearerAuth: [] }],
       },

@@ -1,77 +1,113 @@
-import { Elysia, t } from "elysia";
-import { Webhook } from "svix";
-import { paymentService } from "../services/payment";
-import type { SumopodWebhookPayload } from "../services/sumopod";
+import { Elysia } from "elysia";
 
-const webhookDataSchema = t.Object({
-  payment_id: t.String(),
-  order_id: t.String(),
-  amount: t.Number(),
-  fee: t.Number(),
-  net_amount: t.Number(),
-  status: t.String(),
-  payment_method: t.String(),
-  completed_at: t.Optional(t.String()),
-});
+/**
+ * Callback DANA Gapura — TAHAP STUB.
+ *
+ * Semua endpoint WAJIB membalas HTTP 200 apa pun isi request-nya.
+ * Body mentah + headers hanya dicatat ke console log.
+ * Verifikasi signature SNAP (X-TIMESTAMP / X-SIGNATURE / X-PARTNER-ID)
+ * dan pemrosesan transaksi dilakukan pada iterasi berikutnya (setelah
+ * kredensial DANA diberikan).
+ *
+ * Penting: handler sengaja TIDAK mendeklarasikan schema `body` dan TIDAK
+ * menyentuh context `body` — supaya Elysia tidak melakukan parsing JSON di
+ * luar handler. Body malformed pun tidak akan pernah menghasilkan
+ * error / status non-200.
+ */
+
+/** Catat callback mentah ke console untuk debugging. Selalu aman (tidak pernah throw). */
+async function logCallback(source: string, request: Request): Promise<void> {
+  let rawBody = "(body tidak dapat dibaca)";
+  try {
+    rawBody = (await request.clone().text()) || "(kosong)";
+  } catch {
+    // Abaikan — endpoint tetap harus membalas 200.
+  }
+  // Key header hasil entries() selalu huruf kecil (x-timestamp, x-signature, x-partner-id, ...)
+  const headers = Object.fromEntries(request.headers.entries());
+  console.log(`[Gapura:${source}] ${request.method} ${request.url}`);
+  console.log(`[Gapura:${source}] headers:`, headers);
+  console.log(`[Gapura:${source}] body:`, rawBody);
+}
+
+const FINISH_REDIRECT_HTML = `<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pembayaran Selesai</title>
+  </head>
+  <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f4f6fb;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1a2233;">
+    <div style="max-width:420px;width:calc(100% - 32px);background:#fff;border-radius:16px;padding:40px 32px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.08);">
+      <div style="width:56px;height:56px;margin:0 auto 20px;border-radius:50%;background:#e6f7ec;color:#0a7a3d;font-size:28px;line-height:56px;">&#10003;</div>
+      <h1 style="margin:0 0 8px;font-size:22px;">Pembayaran Selesai</h1>
+      <p style="margin:0 0 24px;color:#5a6478;font-size:15px;line-height:1.5;">Terima kasih! Status pembayaran Anda sudah kami terima. Anda dapat kembali ke aplikasi.</p>
+      <p style="margin:0;color:#9aa3b5;font-size:13px;">Jika halaman ini tidak tertutup otomatis, silakan tutup tab browser ini.</p>
+    </div>
+    <script>try{if(window.opener&&!window.opener.closed)window.close()}catch(e){}</script>
+  </body>
+</html>`;
+
+async function serveFinishRedirect(request: Request): Promise<Response> {
+  await logCallback("finish-redirect", request);
+  return new Response(FINISH_REDIRECT_HTML, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+const GAPURA_TAG = "Webhooks";
 
 export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
-  .derive(async ({ request }) => ({
-    rawBody: await request.clone().text(),
-  }))
   .post(
-    "/sumopod",
-    async ({ body, set, headers, rawBody }) => {
-      // 1. Verifikasi Webhook Token (simple comparison)
-      const token = headers["x-webhook-token"];
-      if (!token || token !== process.env.SUMOPOD_WEBHOOK_TOKEN) {
-        set.status = 401;
-        return { success: false, message: "Unauthorized" };
-      }
-
-      // 2. Verifikasi Svix Signature (HMAC-SHA256)
-      try {
-        const wh = new Webhook(process.env.SUMOPOD_WEBHOOK_SECRET!);
-        wh.verify(rawBody, {
-          "svix-id": headers["svix-id"] ?? "",
-          "svix-timestamp": headers["svix-timestamp"] ?? "",
-          "svix-signature": headers["svix-signature"] ?? "",
-        });
-      } catch {
-        set.status = 401;
-        return { success: false, message: "Invalid signature" };
-      }
-
-      const result = await paymentService.handleGatewayWebhook(
-        body as SumopodWebhookPayload
-      );
-
-      if (result && "test" in result) {
-        return { success: true, message: "Test event received" };
-      }
-
-      if (!result) {
-        set.status = 404;
-        return { success: false, message: "Transaction not found" };
-      }
-
+    "/gapura/finish-payment",
+    async ({ request }) => {
+      await logCallback("finish-payment", request);
       return { success: true };
     },
     {
-      body: t.Object({
-        event_type: t.Union([
-          t.Literal("payment.completed"),
-          t.Literal("payment.failed"),
-          t.Literal("payment.expired"),
-          t.Literal("payment.test"),
-        ]),
-        data: webhookDataSchema,
-      }),
       detail: {
-        summary: "Webhook dari Sumopod",
-        tags: ["Webhooks"],
+        summary: "Finish Payment (notifikasi server-to-server DANA Gapura)",
+        tags: [GAPURA_TAG],
         description:
-          "Daftarkan URL ini di dashboard Sumopod sebagai webhook/callback URL. " +
-          "Event yang didukung: payment.completed, payment.failed, payment.expired, payment.test",
+          "Daftarkan URL ini sebagai Finish Payment URL di dashboard DANA Gapura. " +
+          "Dipanggil server-to-server saat pembayaran selesai/berubah status. " +
+          "Tahap stub: selalu membalas HTTP 200 dan mencatat body + headers ke log.",
       },
     }
-  );
+  )
+  .post(
+    "/gapura/disburse-notify",
+    async ({ request }) => {
+      await logCallback("disburse-notify", request);
+      return { success: true };
+    },
+    {
+      detail: {
+        summary: "Notifikasi disburse ke bank (server-to-server DANA Gapura)",
+        tags: [GAPURA_TAG],
+        description:
+          "Daftarkan URL ini sebagai Disburse to Bank Notify URL di dashboard DANA Gapura. " +
+          "Dipanggil server-to-server saat status transfer ke bank berubah. " +
+          "Tahap stub: selalu membalas HTTP 200 dan mencatat body + headers ke log.",
+      },
+    }
+  )
+  .get(
+    "/gapura/finish-redirect",
+    ({ request }) => serveFinishRedirect(request),
+    {
+      detail: {
+        summary: "Halaman selesai bayar (redirect browser dari DANA Gapura)",
+        tags: [GAPURA_TAG],
+        description:
+          "Daftarkan URL ini sebagai Finish Redirect URL di dashboard DANA Gapura. " +
+          "Browser payer diarahkan ke sini setelah selesai di halaman checkout DANA. " +
+          "Menampilkan halaman HTML 'Pembayaran Selesai' (HTTP 200). POST juga diterima.",
+      },
+    }
+  )
+  .post("/gapura/finish-redirect", ({ request }) => serveFinishRedirect(request));

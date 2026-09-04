@@ -19,7 +19,7 @@ export const transactions = pgTable("transactions", {
   externalId: varchar("external_id", { length: 255 }).notNull(),
   merchantOrderId: varchar("merchant_order_id", { length: 255 }).notNull(),
 
-  // Data dari response Sumopod
+  // Data dari response gateway (DANA Gapura)
   gatewayPaymentId: varchar("gateway_payment_id", { length: 255 }),   // payment_id
   gatewayOrderId: varchar("gateway_order_id", { length: 255 }),        // order_id
   paymentLinkUrl: text("payment_link_url"),                             // payment_link_url

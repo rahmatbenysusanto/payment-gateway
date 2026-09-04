@@ -8,6 +8,7 @@ import { transactionRoutes } from "./routes/transactions";
 import { adminTransactionRoutes } from "./routes/adminTransactions";
 import { webhookRoutes } from "./routes/webhooks";
 import { reportRoutes } from "./routes/reports";
+import { GatewayNotConfiguredError } from "./services/payment";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -26,7 +27,7 @@ const app = new Elysia()
           title: "Payment Gateway API",
           version: "1.0.0",
           description:
-            "Centralized payment gateway service — satu integrasi Sumopod untuk semua sistem.",
+            "Centralized payment gateway service — integrasi DANA Gapura untuk semua sistem.",
         },
         components: {
           securitySchemes: {
@@ -43,12 +44,20 @@ const app = new Elysia()
           { name: "Merchants", description: "Manajemen sistem klien (Allora, Nabungmas, dll)" },
           { name: "Admin", description: "Endpoint admin — semua transaksi lintas merchant" },
           { name: "Transactions", description: "Transaksi pembayaran QRIS (per merchant API key)" },
-          { name: "Webhooks", description: "Callback dari Sumopod" },
+          {
+            name: "Webhooks",
+            description:
+              "Callback dari DANA Gapura (finish-payment, disburse-notify, finish-redirect)",
+          },
         ],
       },
     })
   )
   .onError(({ code, error, set }) => {
+    if (error instanceof GatewayNotConfiguredError) {
+      set.status = 503;
+      return { success: false, message: error.message };
+    }
     if (code === "VALIDATION") {
       set.status = 422;
       return { success: false, message: "Validation error", errors: error.message };

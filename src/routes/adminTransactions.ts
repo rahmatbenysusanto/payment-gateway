@@ -3,7 +3,7 @@ import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../config/database";
 import { transactions, merchants } from "../db/schema";
 import { adminAuthMiddleware } from "../middleware/adminAuth";
-import { paymentService } from "../services/payment";
+import { paymentService, GatewayNotConfiguredError } from "../services/payment";
 
 export const adminTransactionRoutes = new Elysia({ prefix: "/admin/transactions" })
   .use(adminAuthMiddleware)
@@ -94,6 +94,7 @@ export const adminTransactionRoutes = new Elysia({ prefix: "/admin/transactions"
           : null;
         return { success: true, data: { ...updated, merchantName: merchant?.name ?? "Unknown" } };
       } catch (err) {
+        if (err instanceof GatewayNotConfiguredError) throw err;
         set.status = 400;
         return { success: false, message: err instanceof Error ? err.message : "Gagal cek status" };
       }
@@ -101,7 +102,7 @@ export const adminTransactionRoutes = new Elysia({ prefix: "/admin/transactions"
     {
       params: t.Object({ id: t.String() }),
       detail: {
-        summary: "Cek status ke Sumopod (Admin)",
+        summary: "Cek status pembayaran (Admin)",
         tags: ["Admin"],
         security: [{ BearerAuth: [] }],
       },

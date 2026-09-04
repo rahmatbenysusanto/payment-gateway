@@ -1,11 +1,20 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../config/database";
-import { transactions, merchants, webhookLogs, apiKeys } from "../db/schema";
-import { sumopodService, type SumopodWebhookPayload } from "./sumopod";
+import { transactions, webhookLogs } from "../db/schema";
 import { signWebhook } from "../utils/apiKey";
-import type { InferInsertModel } from "drizzle-orm";
 
-type NewTransaction = InferInsertModel<typeof transactions>;
+export type TransactionRow = typeof transactions.$inferSelect;
+
+/** Error saat provider gateway (DANA Gapura) belum diaktifkan/dikonfigurasi. */
+export class GatewayNotConfiguredError extends Error {
+  constructor(message?: string) {
+    super(
+      message ??
+        "Payment gateway (DANA Gapura) belum dikonfigurasi — fitur ini belum tersedia."
+    );
+    this.name = "GatewayNotConfiguredError";
+  }
+}
 
 export interface CreatePaymentInput {
   merchantId: string;
@@ -25,70 +34,11 @@ export interface CreatePaymentInput {
 }
 
 export class PaymentService {
-  async createPayment(input: CreatePaymentInput) {
-    const merchant = await db.query.merchants.findFirst({
-      where: eq(merchants.id, input.merchantId),
-    });
-
-    if (!merchant) throw new Error("Merchant not found");
-    if (!merchant.isActive) throw new Error("Merchant is not active");
-
-    const existingTx = await db.query.transactions.findFirst({
-      where: and(
-        eq(transactions.merchantId, input.merchantId),
-        eq(transactions.merchantOrderId, input.merchantOrderId)
-      ),
-    });
-
-    if (existingTx) {
-      throw new Error(`Order ID '${input.merchantOrderId}' sudah digunakan`);
-    }
-
-    const expiresInHours = input.expiresInHours ?? 24;
-
-    const gatewayResult = await sumopodService.createPayment({
-      orderId: input.merchantOrderId,
-      amount: input.amount,
-      currency: input.currency || "IDR",
-      expiresInHours,
-      successReturnUrl: input.successReturnUrl || merchant.callbackUrl || undefined,
-      cancelReturnUrl: input.cancelReturnUrl || merchant.callbackUrl || undefined,
-    });
-
-    const newTx: NewTransaction = {
-      merchantId: input.merchantId,
-      externalId: input.externalId,
-      merchantOrderId: input.merchantOrderId,
-      amount: input.amount,
-      fee: gatewayResult.fee,
-      netAmount: gatewayResult.netAmount,
-      currency: input.currency || "IDR",
-      description: input.description,
-      customerName: input.customerName,
-      customerEmail: input.customerEmail,
-      customerPhone: input.customerPhone,
-      callbackUrl: input.callbackUrl || merchant.callbackUrl,
-      expiredAt: new Date(gatewayResult.expiresAt),
-      status: sumopodService.mapStatus(gatewayResult.status),
-      gatewayPaymentId: gatewayResult.paymentId,
-      gatewayOrderId: gatewayResult.orderId,
-      paymentLinkUrl: gatewayResult.paymentLinkUrl,
-      paymentCode: gatewayResult.paymentCode,
-      paymentCodeType: gatewayResult.paymentCodeType,
-      paymentChannel: gatewayResult.paymentChannel,
-      gatewayRequest: {
-        order_id: input.merchantOrderId,
-        amount: input.amount,
-        currency: input.currency || "IDR",
-        expires_in_hours: expiresInHours,
-        payment_method_type_code: "QRIS",
-      },
-      gatewayResponse: gatewayResult.raw,
-      metadata: input.metadata,
-    };
-
-    const [created] = await db.insert(transactions).values(newTx).returning();
-    return created;
+  async createPayment(input: CreatePaymentInput): Promise<TransactionRow> {
+    // TODO(Gapura): integrasi Create Order API DANA Gapura — aktifkan kembali pada iterasi berikutnya.
+    throw new GatewayNotConfiguredError(
+      "Pembuatan transaksi belum tersedia — integrasi DANA Gapura belum dikonfigurasi."
+    );
   }
 
   async getTransactionById(id: string, merchantId?: string) {
@@ -108,101 +58,18 @@ export class PaymentService {
     });
   }
 
-  async checkPaymentStatus(transactionId: string) {
-    const tx = await db.query.transactions.findFirst({
-      where: eq(transactions.id, transactionId),
-    });
-
-    if (!tx) throw new Error("Transaction not found");
-    if (!tx.gatewayPaymentId) return tx;
-
-    const gatewayStatus = await sumopodService.getPaymentStatus(
-      tx.gatewayPaymentId
+  async checkPaymentStatus(transactionId: string): Promise<TransactionRow> {
+    // TODO(Gapura): inquiry status transaksi ke API DANA Gapura — aktifkan kembali pada iterasi berikutnya.
+    throw new GatewayNotConfiguredError(
+      "Pengecekan status belum tersedia — integrasi DANA Gapura belum dikonfigurasi."
     );
-
-    const newStatus = sumopodService.mapStatus(gatewayStatus.status);
-
-    if (newStatus !== tx.status) {
-      const [updated] = await db
-        .update(transactions)
-        .set({
-          status: newStatus,
-          paidAt: newStatus === "paid" ? new Date() : tx.paidAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(transactions.id, transactionId))
-        .returning();
-
-      return updated;
-    }
-
-    return tx;
   }
 
-  async handleGatewayWebhook(payload: SumopodWebhookPayload) {
-    const { event_type, data } = payload;
-
-    // Event test dari Sumopod — acknowledge tapi tidak proses
-    if (event_type === "payment.test") {
-      console.log("[Webhook] Received test event from Sumopod");
-      return { test: true };
-    }
-
-    const newStatus = sumopodService.mapEventType(event_type);
-    if (!newStatus) {
-      console.warn(`[Webhook] Unknown event_type: ${event_type}`);
-      return null;
-    }
-
-    const tx = await db.query.transactions.findFirst({
-      where: eq(transactions.merchantOrderId, data.order_id),
-    });
-
-    if (!tx) {
-      console.warn(`[Webhook] Transaction not found for order: ${data.order_id}`);
-      return null;
-    }
-
-    const paidAt = newStatus === "paid"
-      ? (data.completed_at ? new Date(data.completed_at) : new Date())
-      : tx.paidAt;
-
-    const [updated] = await db
-      .update(transactions)
-      .set({
-        status: newStatus,
-        gatewayPaymentId: data.payment_id || tx.gatewayPaymentId,
-        paidAt,
-        gatewayWebhookData: payload as unknown as Record<string, unknown>,
-        updatedAt: new Date(),
-      })
-      .where(eq(transactions.id, tx.id))
-      .returning();
-
-    if (tx.callbackUrl) {
-      const merchantApiKey = await db.query.apiKeys.findFirst({
-        where: and(eq(apiKeys.merchantId, tx.merchantId), eq(apiKeys.isActive, true)),
-        columns: { apiKey: true },
-      });
-
-      await this.dispatchMerchantWebhook(tx.id, tx.merchantId, tx.callbackUrl, merchantApiKey?.apiKey ?? null, {
-        event: event_type,
-        transaction: {
-          id: updated.id,
-          orderId: updated.merchantOrderId,
-          externalId: updated.externalId,
-          status: updated.status,
-          amount: updated.amount,
-          fee: updated.fee,
-          netAmount: updated.netAmount,
-          paidAt: updated.paidAt,
-        },
-      });
-    }
-
-    return updated;
-  }
-
+  /**
+   * Kirim notifikasi ke sistem client (merchant) via callbackUrl-nya.
+   * Gateway-agnostic — akan dipanggil ulang oleh handler webhook DANA Gapura
+   * pada iterasi berikutnya.
+   */
   private async dispatchMerchantWebhook(
     transactionId: string,
     merchantId: string,
